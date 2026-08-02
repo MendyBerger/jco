@@ -302,8 +302,8 @@ importers:
         specifier: npm:@bytecodealliance/componentize-js@^0.19.3
         version: '@bytecodealliance/componentize-js@0.19.3(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)'
       '@bytecodealliance/jco-transpile':
-        specifier: ^0.5.2
-        version: 0.5.2
+        specifier: workspace:*
+        version: link:../jco-transpile
       '@bytecodealliance/preview2-shim':
         specifier: ^0.17.9
         version: 0.17.9
@@ -4409,7 +4409,7 @@ snapshots:
     dependencies:
       '@bytecodealliance/componentize-js': 0.21.0(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)
       '@bytecodealliance/componentize-js-0-19-3': '@bytecodealliance/componentize-js@0.19.3'
-      '@bytecodealliance/jco-transpile': 0.5.2
+      '@bytecodealliance/jco-transpile': link:packages/jco-transpile
       '@bytecodealliance/preview2-shim': 0.17.9
       '@bytecodealliance/preview3-shim': 0.1.2
       binaryen: 130.0.0

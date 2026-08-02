@@ -278,6 +278,10 @@ impl AsyncTaskIntrinsic {
             Self::AsyncTaskClass.name(),
             Self::ContextGet.name(),
             Self::ContextSet.name(),
+            // helpers emitted alongside ContextGet
+            "CONTEXT_NO_TASK_STORAGE",
+            "_contextTaskCache",
+            "_contextCurrentTask",
             Self::GetCurrentTask.name(),
             Self::CreateNewCurrentTask.name(),
             Self::ClearCurrentTask.name(),
@@ -361,11 +365,8 @@ impl AsyncTaskIntrinsic {
             }
 
             Self::ContextSet => {
-                let debug_log_fn = Intrinsic::DebugLog.name();
                 let context_set_fn = Self::ContextSet.name();
-                let current_task_get_fn = Self::GetCurrentTask.name();
                 let type_check_i32 = Intrinsic::TypeCheckValidI32.name();
-                let get_global_current_task_meta_fn = Intrinsic::GetGlobalCurrentTaskMetaFn.name();
 
                 uwriteln!(
                     output,
@@ -376,25 +377,11 @@ impl AsyncTaskIntrinsic {
                           if (slot === undefined) {{ throw new TypeError("missing slot"); }}
                           if (!({type_check_i32}(value))) {{ throw new Error('invalid value for context set (not valid i32)'); }}
 
-                          const currentTaskMeta = {get_global_current_task_meta_fn}(componentIdx);
-                          if (!currentTaskMeta) {{
-                              throw new Error(`missing/incomplete global current task meta for component idx [${{componentIdx}}] during context set`);
+                          const task = _contextCurrentTask(componentIdx);
+                          if (task === null) {{
+                              (CONTEXT_NO_TASK_STORAGE[componentIdx] ??= [0, 0])[slot] = value;
+                              return;
                           }}
-                          const taskID = currentTaskMeta.taskID;
-
-                          const taskMeta = {current_task_get_fn}(componentIdx, taskID);
-                          if (!taskMeta) {{ throw new Error('failed to retrieve current task'); }}
-
-                          let task = taskMeta.task;
-                          if (!task) {{ throw new Error('invalid/missing current task in metadata while setting context'); }}
-
-                          {debug_log_fn}('[{context_set_fn}()] args', {{
-                              slot,
-                              value,
-                              storage: task.storage,
-                              taskID: task.id(),
-                              componentIdx: task.componentIdx(),
-                          }});
 
                           if (slot < 0 || slot >= task.storage.length) {{ throw new Error('invalid slot for current task'); }}
                           task.storage[slot] = value;
@@ -404,37 +391,51 @@ impl AsyncTaskIntrinsic {
             }
 
             Self::ContextGet => {
-                let debug_log_fn = Intrinsic::DebugLog.name();
                 let context_get_fn = Self::ContextGet.name();
                 let current_task_get_fn = Self::GetCurrentTask.name();
-                let get_global_current_task_meta_fn = Intrinsic::GetGlobalCurrentTaskMetaFn.name();
+                let global_current_task_meta_obj = Intrinsic::GlobalCurrentTaskMeta.name();
 
+                // context.get/context.set sit on a hot path: with the
+                // shared-everything ABI the shadow stack pointer is
+                // saved/restored through them, so they are called around a
+                // large fraction of all cross-boundary calls. Resolve the
+                // current task without allocating: read the task meta global
+                // directly (no copy) and cache the task lookup per
+                // (componentIdx, taskID).
+                //
+                // Code that runs outside any task -- e.g. `_initialize`,
+                // invoked during instantiation by a start-shim core module,
+                // before the first task exists -- gets per-component fallback
+                // storage instead of an error.
                 uwriteln!(
                     output,
                     r#"
+                      const CONTEXT_NO_TASK_STORAGE = {{}};
+                      let _contextTaskCache = null; // {{ componentIdx, taskID, task }}
+
+                      function _contextCurrentTask(componentIdx) {{
+                          const meta = {global_current_task_meta_obj}[componentIdx];
+                          if (meta === undefined || meta === null) {{ return null; }}
+                          const cached = _contextTaskCache;
+                          if (cached !== null && cached.componentIdx === componentIdx && cached.taskID === meta.taskID) {{
+                              return cached.task;
+                          }}
+                          const taskMeta = {current_task_get_fn}(componentIdx, meta.taskID);
+                          const task = taskMeta && taskMeta.task;
+                          if (!task) {{ throw new Error('failed to retrieve current task'); }}
+                          _contextTaskCache = {{ componentIdx, taskID: meta.taskID, task }};
+                          return task;
+                      }}
+
                       function {context_get_fn}(ctx) {{
                           const {{ componentIdx, slot }} = ctx;
                           if (componentIdx === undefined) {{ throw new TypeError("missing component idx"); }}
                           if (slot === undefined) {{ throw new TypeError("missing slot"); }}
 
-                          const currentTaskMeta = {get_global_current_task_meta_fn}(componentIdx);
-                          if (!currentTaskMeta) {{
-                              throw new Error(`missing/incomplete global current task meta for component idx [${{componentIdx}}] during context set`);
+                          const task = _contextCurrentTask(componentIdx);
+                          if (task === null) {{
+                              return (CONTEXT_NO_TASK_STORAGE[componentIdx] ??= [0, 0])[slot] ?? 0;
                           }}
-                          const taskID = currentTaskMeta.taskID;
-
-                          const taskMeta = {current_task_get_fn}(componentIdx, taskID);
-                          if (!taskMeta) {{ throw new Error('failed to retrieve current task'); }}
-
-                          let task = taskMeta.task;
-                          if (!task) {{ throw new Error('invalid/missing current task in metadata while getting context'); }}
-
-                          {debug_log_fn}('[{context_get_fn}()] args', {{
-                              slot,
-                              storage: task.storage,
-                              taskID: task.id(),
-                              componentIdx: task.componentIdx(),
-                          }});
 
                           if (slot < 0 || slot >= task.storage.length) {{ throw new Error('invalid slot for current task'); }}
 
@@ -443,6 +444,7 @@ impl AsyncTaskIntrinsic {
                     "#
                 );
             }
+
 
             // Equivalent of `task.return`
             Self::TaskReturn => {
@@ -916,7 +918,10 @@ impl AsyncTaskIntrinsic {
 
                            this.#onResolveHandlers.push((results) => {{
                                if (this.#parentSubtask !== null) {{ return; }}
-                               if (!this.#isAsync) {{ return; }}
+                               // manual-async (porcelain-wrapped) tasks hand their
+                               // completionPromise to callers on the error path, so
+                               // it must settle for them too
+                               if (!this.#isAsync && !this.#isManualAsync) {{ return; }}
 
                                if (this.#errored !== null) {{
                                    rejectCompletionPromise(this.#errored);

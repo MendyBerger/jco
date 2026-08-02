@@ -4904,12 +4904,31 @@ impl<'a> Instantiator<'a, '_> {
                         "Internal error: Resource constructor must be defined before other methods and statics"
                     );
                 }
-                uwrite!(
-                    self.src.js,
-                    "
-                    class {local_name} {{
-                        constructor"
-                );
+                if requires_async_porcelain || is_async {
+                    // JS constructors cannot be `async`, but they may return an
+                    // object -- delegate to a static async factory so that
+                    // `await new X(...)` resolves to the instance. The bindgen'd
+                    // body handles the non-`new` invocation (`new.target` is
+                    // undefined inside the factory, so it creates the instance
+                    // via Object.create).
+                    uwrite!(
+                        self.src.js,
+                        "
+                        class {local_name} {{
+                            constructor() {{
+                                return {local_name}.$asyncNew(...arguments);
+                            }}
+                        }}
+                        {local_name}.$asyncNew = async function $asyncNew"
+                    );
+                } else {
+                    uwrite!(
+                        self.src.js,
+                        "
+                        class {local_name} {{
+                            constructor"
+                    );
+                }
                 self.defined_resource_classes.insert(local_name.to_string());
             }
             FunctionKind::AsyncFreestanding => {
@@ -4982,7 +5001,15 @@ impl<'a> Instantiator<'a, '_> {
             | FunctionKind::AsyncStatic(_)
             | FunctionKind::Method(_)
             | FunctionKind::Static(_) => self.src.js(";\n"),
-            FunctionKind::Constructor(_) => self.src.js("\n}\n"),
+            FunctionKind::Constructor(_) => {
+                if requires_async_porcelain || is_async {
+                    // close the `$asyncNew` static factory (the class was
+                    // already closed when it was emitted)
+                    self.src.js(";\n");
+                } else {
+                    self.src.js("\n}\n");
+                }
+            }
         }
     }
 }

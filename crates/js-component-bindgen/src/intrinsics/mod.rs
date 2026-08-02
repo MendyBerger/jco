@@ -941,6 +941,12 @@ impl Intrinsic {
                           if (!args.fn) {{ throw new TypeError('missing fn'); }}
                           const {{ taskID, componentIdx, fn }} = args;
 
+                          // Save/restore rather than null: spans for the same component
+                          // interleave (nested callees, tick-loop callbacks), and clearing
+                          // unconditionally would wipe the meta of a still-suspended outer
+                          // task. Restore only if the slot still holds *our* meta so a
+                          // newer task's meta is never clobbered by an older frame.
+                          const prevTaskMeta = {global_current_task_meta_obj}[componentIdx] ?? null;
                           try {{
                               {global_current_task_meta_obj}[componentIdx] = {{ taskID, componentIdx }};
                               return fn();
@@ -951,7 +957,10 @@ impl Intrinsic {
                               }});
                               throw err;
                           }} finally {{
-                              {global_current_task_meta_obj}[componentIdx] = null;
+                              const cur = {global_current_task_meta_obj}[componentIdx];
+                              if (cur && cur.taskID === taskID) {{
+                                  {global_current_task_meta_obj}[componentIdx] = prevTaskMeta;
+                              }}
                           }}
                       }}
                     "#,
@@ -1001,6 +1010,10 @@ impl Intrinsic {
 
                           const {{ taskID, componentIdx, fn }} = args;
 
+                          // Save/restore rather than null -- see the sync variant. Across
+                          // `await`s other spans may run; the ownership check in `finally`
+                          // keeps this frame from clobbering meta it no longer owns.
+                          const prevTaskMeta = {global_current_task_meta_obj}[componentIdx] ?? null;
                           try {{
                               {global_current_task_meta_obj}[componentIdx] = {{ taskID, componentIdx }};
                               return await fn();
@@ -1011,7 +1024,10 @@ impl Intrinsic {
                               }});
                               throw err;
                           }} finally {{
-                              {global_current_task_meta_obj}[componentIdx] = null;
+                              const cur = {global_current_task_meta_obj}[componentIdx];
+                              if (cur && cur.taskID === taskID) {{
+                                  {global_current_task_meta_obj}[componentIdx] = prevTaskMeta;
+                              }}
                           }}
                       }}
                     "#,
