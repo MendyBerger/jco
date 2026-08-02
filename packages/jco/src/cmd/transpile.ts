@@ -26,6 +26,7 @@ export interface TranspileOpts {
     namespacedExports?: boolean;
     outDir?: string;
     multiMemory?: boolean;
+    exnref?: boolean;
     experimentalIdlImports?: boolean;
     optArgs?: string[];
     wasmOptBin?: string[];
@@ -72,6 +73,12 @@ function prepOpts(opts: any, program?: any) {
 
     if (!opts.quiet) {
         setShowSpinner(true);
+    }
+
+    // The CLI uses the short `--exnref` spelling, while the underlying
+    // transpile API names the option for what it actually asserts.
+    if (opts.exnref !== undefined) {
+        opts.supportsWasmExnref = opts.exnref;
     }
 
     if (opts.map) {

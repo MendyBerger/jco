@@ -73,6 +73,7 @@ impl bindings::Guest for JsComponentBindgenComponent {
             .maybe_async_mode(options.async_mode.map(Into::into))
             .strict(options.strict.unwrap_or(false))
             .asmjs(options.asmjs.unwrap_or(false))
+            .supports_wasm_exnref(options.supports_wasm_exnref.unwrap_or(false))
             .build();
 
         let js_component_bindgen::Transpiled {

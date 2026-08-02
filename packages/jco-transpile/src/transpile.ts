@@ -139,6 +139,17 @@ export interface TranspilationOptions {
 
     /** Whether to run bindgen in strict mode */
     strict?: boolean;
+
+    /**
+     * Whether the target JS engine supports the Wasm exception handling
+     * proposal (`try_table`/exnref).
+     *
+     * When disabled (the default), the exceptions feature is masked off during
+     * component validation, so generated adapters avoid exception barriers that
+     * today's JS engines only run behind a flag (e.g. V8's
+     * `--experimental-wasm-exnref`).
+     */
+    supportsWasmExnref?: boolean;
 }
 
 interface TranspilationResult {
@@ -305,6 +316,7 @@ export async function transpileBytes(
         strict: opts.strict === true,
         idlImports: opts.experimentalIdlImports === true,
         asmjs: opts.js === true,
+        supportsWasmExnref: opts.supportsWasmExnref === true,
     };
 
     // Generate the component

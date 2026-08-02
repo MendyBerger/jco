@@ -75,6 +75,14 @@ world js-component-bindgen {
 
     /// Whether the core module(s) were actually transpiled from Wasm to JS (asm.js) and thus needs shimming for i64
     asmjs: option<bool>,
+
+    /// Whether the target JS engine supports the exception handling proposal
+    /// (`try_table`/exnref).
+    ///
+    /// When disabled (the default), the exceptions feature is masked off during
+    /// component validation, so that generated adapters do not wrap calls in
+    /// exception barriers which today's JS engines only run behind a flag.
+    supports-wasm-exnref: option<bool>,
   }
 
   record async-imports-exports {
